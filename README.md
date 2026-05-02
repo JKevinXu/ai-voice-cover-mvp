@@ -28,6 +28,8 @@ The app ships with:
 
 This is not a production voice-cloning service yet. It does not bundle model weights, RVC, Demucs, GPUs, or a production job queue. The goal is to provide a clear MVP shell that can be connected to the open-source ML stack.
 
+YouTube input is supported for convenience, but only for voices you own or have explicit permission to clone. Do not use it to clone public figures, artists, celebrities, private individuals, or copyrighted performances without authorization.
+
 ## Quick start: mock mode
 
 ```bash
@@ -46,17 +48,17 @@ http://127.0.0.1:8000
 
 Upload:
 
-- sample song / target voice audio
+- sample song / target voice audio, or a YouTube URL for the target voice sample
 - guide vocal for the new song
 - optional instrumental
 - check the consent box
 - choose `mock`
 
-Mock mode copies files to prove the workflow and API are working.
+Mock mode copies files to prove the workflow and API are working. YouTube URL mode uses `yt-dlp` to download a short audio sample into the job upload directory.
 
 ## API
 
-Create job:
+Create job with uploaded sample:
 
 ```bash
 curl -F consent=true \
@@ -65,6 +67,18 @@ curl -F consent=true \
   -F guide_vocal=@guide.wav \
   http://127.0.0.1:8000/api/jobs
 ```
+
+Create job with YouTube sample URL:
+
+```bash
+curl -F consent=true \
+  -F mode=mock \
+  -F sample_youtube_url='https://www.youtube.com/watch?v=VIDEO_ID' \
+  -F guide_vocal=@guide.wav \
+  http://127.0.0.1:8000/api/jobs
+```
+
+You must provide exactly one sample source: `sample_song` upload or `sample_youtube_url`.
 
 Get job:
 

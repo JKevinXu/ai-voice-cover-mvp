@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 
 from .pipeline import PipelineConfig, VoiceCoverPipeline
+from .youtube import YouTubeAudioDownloader
 
 
 class JobRecord(BaseModel):
@@ -17,6 +18,8 @@ class JobRecord(BaseModel):
     status: str
     mode: str
     sample_song: str
+    sample_source: str = "upload"
+    sample_youtube_url: str | None = None
     guide_vocal: str
     instrumental: str | None = None
     final_vocal: str | None = None
@@ -43,10 +46,11 @@ class InMemoryJobStore:
         return updated
 
 
-def create_app(workspace: Path | str = "./workspace") -> FastAPI:
+def create_app(workspace: Path | str = "./workspace", youtube_downloader: YouTubeAudioDownloader | None = None) -> FastAPI:
     workspace_path = Path(workspace)
     workspace_path.mkdir(parents=True, exist_ok=True)
     store = InMemoryJobStore()
+    downloader = youtube_downloader or YouTubeAudioDownloader()
     app = FastAPI(title="AI Voice Cover MVP", version="0.1.0")
 
     @app.get("/", response_class=HTMLResponse)
@@ -59,7 +63,9 @@ def create_app(workspace: Path | str = "./workspace") -> FastAPI:
             <h1>AI Voice Cover MVP</h1>
             <p>Consent-based singing voice conversion using open-source Demucs + RVC adapters.</p>
             <form action="/api/jobs" method="post" enctype="multipart/form-data">
-              <label>Sample song / target voice audio<br><input name="sample_song" type="file" required></label><br><br>
+              <label>Sample song / target voice audio<br><input name="sample_song" type="file"></label><br>
+              <label>Or YouTube URL for target voice sample<br><input name="sample_youtube_url" type="url" placeholder="https://www.youtube.com/watch?v=..."></label>
+              <p style="font-size: 0.9em; color: #555;">Provide exactly one sample source: upload OR YouTube URL. Only use voices you own or have permission to clone.</p>
               <label>Guide vocal for the new song<br><input name="guide_vocal" type="file" required></label><br><br>
               <label>Optional instrumental track<br><input name="instrumental" type="file"></label><br><br>
               <label>Mode
@@ -78,9 +84,10 @@ def create_app(workspace: Path | str = "./workspace") -> FastAPI:
     @app.post("/api/jobs", response_model=JobRecord)
     async def create_job(
         background_tasks: BackgroundTasks,
-        sample_song: Annotated[UploadFile, File()],
-        guide_vocal: Annotated[UploadFile, File()],
+        sample_song: Annotated[UploadFile | None, File()] = None,
+        guide_vocal: Annotated[UploadFile, File()] = None,
         instrumental: Annotated[UploadFile | None, File()] = None,
+        sample_youtube_url: Annotated[str | None, Form()] = None,
         consent: Annotated[str | None, Form()] = None,
         mode: Annotated[str, Form()] = "mock",
         dry_run: Annotated[bool, Form()] = False,
@@ -89,11 +96,27 @@ def create_app(workspace: Path | str = "./workspace") -> FastAPI:
             raise HTTPException(status_code=400, detail="Consent is required: only clone your own voice or voices you have explicit permission to use.")
         if mode not in {"mock", "real"}:
             raise HTTPException(status_code=400, detail="mode must be 'mock' or 'real'")
+        if guide_vocal is None:
+            raise HTTPException(status_code=400, detail="guide_vocal upload is required")
+
+        youtube_url = sample_youtube_url.strip() if sample_youtube_url else None
+        has_upload = sample_song is not None and bool(sample_song.filename)
+        has_youtube = bool(youtube_url)
+        if has_upload == has_youtube:
+            raise HTTPException(status_code=400, detail="Provide exactly one sample source: sample_song upload or sample_youtube_url")
 
         job_id = uuid.uuid4().hex[:12]
         upload_dir = workspace_path / "jobs" / job_id / "uploads"
         upload_dir.mkdir(parents=True, exist_ok=True)
-        sample_path = await _save_upload(sample_song, upload_dir)
+        if has_youtube:
+            try:
+                sample_path = downloader.download_audio(youtube_url, upload_dir)  # type: ignore[arg-type]
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail=f"Could not download YouTube sample: {exc}") from exc
+            sample_source = "youtube"
+        else:
+            sample_path = await _save_upload(sample_song, upload_dir)  # type: ignore[arg-type]
+            sample_source = "upload"
         guide_path = await _save_upload(guide_vocal, upload_dir)
         instrumental_path = await _save_upload(instrumental, upload_dir) if instrumental else None
 
@@ -103,6 +126,8 @@ def create_app(workspace: Path | str = "./workspace") -> FastAPI:
                 status="queued",
                 mode=mode,
                 sample_song=str(sample_path),
+                sample_source=sample_source,
+                sample_youtube_url=youtube_url if has_youtube else None,
                 guide_vocal=str(guide_path),
                 instrumental=str(instrumental_path) if instrumental_path else None,
             )
