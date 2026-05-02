@@ -49,8 +49,8 @@ def test_create_mock_job_saves_uploads_and_returns_job(tmp_path: Path):
 
 
 class FakeYouTubeDownloader:
-    def download_audio(self, url: str, output_dir: Path) -> Path:
-        path = output_dir / "youtube_sample.m4a"
+    def download_audio(self, url: str, output_dir: Path, prefix: str = "sample") -> Path:
+        path = output_dir / f"{prefix}_youtube.m4a"
         path.write_bytes(f"downloaded from {url}".encode())
         return path
 
@@ -76,8 +76,60 @@ def test_create_job_accepts_youtube_url_as_sample_source(tmp_path: Path):
     assert body["sample_source"] == "youtube"
     assert body["sample_youtube_url"] == "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
     sample_path = Path(body["sample_song"])
-    assert sample_path.name == "youtube_sample.m4a"
+    assert sample_path.name == "sample_youtube.m4a"
     assert sample_path.exists()
+
+
+def test_create_job_accepts_youtube_url_as_guide_source(tmp_path: Path):
+    app = create_app(workspace=tmp_path, youtube_downloader=FakeYouTubeDownloader())
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/jobs",
+        data={
+            "consent": "true",
+            "mode": "mock",
+            "sample_youtube_url": "https://www.youtube.com/watch?v=12ODcJ3MjvQ",
+            "guide_youtube_url": "https://www.youtube.com/watch?v=DYptgVvkVLQ",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["sample_source"] == "youtube"
+    assert body["guide_source"] == "youtube"
+    assert body["guide_youtube_url"] == "https://www.youtube.com/watch?v=DYptgVvkVLQ"
+    assert Path(body["sample_song"]).name == "sample_youtube.m4a"
+    assert Path(body["guide_vocal"]).name == "guide_youtube.m4a"
+
+
+def test_create_job_requires_exactly_one_guide_source(tmp_path: Path):
+    app = create_app(workspace=tmp_path, youtube_downloader=FakeYouTubeDownloader())
+    client = TestClient(app)
+
+    missing = client.post(
+        "/api/jobs",
+        data={
+            "consent": "true",
+            "mode": "mock",
+            "sample_youtube_url": "https://youtu.be/12ODcJ3MjvQ",
+        },
+    )
+    assert missing.status_code == 400
+    assert "guide" in missing.json()["detail"].lower()
+
+    both = client.post(
+        "/api/jobs",
+        data={
+            "consent": "true",
+            "mode": "mock",
+            "sample_youtube_url": "https://youtu.be/12ODcJ3MjvQ",
+            "guide_youtube_url": "https://youtu.be/DYptgVvkVLQ",
+        },
+        files={"guide_vocal": ("guide.wav", b"guide-audio", "audio/wav")},
+    )
+    assert both.status_code == 400
+    assert "one guide source" in both.json()["detail"].lower()
 
 
 def test_create_job_requires_exactly_one_sample_source(tmp_path: Path):

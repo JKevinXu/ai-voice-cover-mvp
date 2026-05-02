@@ -27,12 +27,12 @@ class YouTubeAudioDownloader:
         self.runner = runner or self._default_runner
         self.sample_section = sample_section
 
-    def download_audio(self, url: str, output_dir: Path) -> Path:
+    def download_audio(self, url: str, output_dir: Path, prefix: str = "sample") -> Path:
         if not validate_youtube_url(url):
-            raise ValueError("Only YouTube URLs are supported for sample_youtube_url")
+            raise ValueError("Only YouTube URLs are supported for audio URL inputs")
         output_dir.mkdir(parents=True, exist_ok=True)
-        output_template = str(output_dir / "sample.%(id)s.%(ext)s")
-        before = set(glob.glob(str(output_dir / "sample.*")))
+        output_template = str(output_dir / f"{prefix}.%(id)s.%(ext)s")
+        before = set(glob.glob(str(output_dir / f"{prefix}.*")))
         command = [
             "yt-dlp",
             "--extract-audio",
@@ -45,9 +45,9 @@ class YouTubeAudioDownloader:
             url,
         ]
         self.runner(command)
-        after = sorted(set(glob.glob(str(output_dir / "sample.*"))) - before)
+        after = sorted(set(glob.glob(str(output_dir / f"{prefix}.*"))) - before)
         if not after:
-            after = sorted(glob.glob(str(output_dir / "sample.*")))
+            after = sorted(glob.glob(str(output_dir / f"{prefix}.*")))
         if not after:
             raise RuntimeError("yt-dlp completed but no YouTube audio sample was created")
         return Path(after[-1])

@@ -21,6 +21,8 @@ class JobRecord(BaseModel):
     sample_source: str = "upload"
     sample_youtube_url: str | None = None
     guide_vocal: str
+    guide_source: str = "upload"
+    guide_youtube_url: str | None = None
     instrumental: str | None = None
     final_vocal: str | None = None
     final_mix: str | None = None
@@ -66,7 +68,9 @@ def create_app(workspace: Path | str = "./workspace", youtube_downloader: YouTub
               <label>Sample song / target voice audio<br><input name="sample_song" type="file"></label><br>
               <label>Or YouTube URL for target voice sample<br><input name="sample_youtube_url" type="url" placeholder="https://www.youtube.com/watch?v=..."></label>
               <p style="font-size: 0.9em; color: #555;">Provide exactly one sample source: upload OR YouTube URL. Only use voices you own or have permission to clone.</p>
-              <label>Guide vocal for the new song<br><input name="guide_vocal" type="file" required></label><br><br>
+              <label>Guide vocal for the new song<br><input name="guide_vocal" type="file"></label><br>
+              <label>Or YouTube URL for guide vocal<br><input name="guide_youtube_url" type="url" placeholder="https://www.youtube.com/watch?v=..."></label>
+              <p style="font-size: 0.9em; color: #555;">Provide exactly one guide source: upload OR YouTube URL.</p>
               <label>Optional instrumental track<br><input name="instrumental" type="file"></label><br><br>
               <label>Mode
                 <select name="mode">
@@ -85,9 +89,10 @@ def create_app(workspace: Path | str = "./workspace", youtube_downloader: YouTub
     async def create_job(
         background_tasks: BackgroundTasks,
         sample_song: Annotated[UploadFile | None, File()] = None,
-        guide_vocal: Annotated[UploadFile, File()] = None,
+        guide_vocal: Annotated[UploadFile | None, File()] = None,
         instrumental: Annotated[UploadFile | None, File()] = None,
         sample_youtube_url: Annotated[str | None, Form()] = None,
+        guide_youtube_url: Annotated[str | None, Form()] = None,
         consent: Annotated[str | None, Form()] = None,
         mode: Annotated[str, Form()] = "mock",
         dry_run: Annotated[bool, Form()] = False,
@@ -96,28 +101,39 @@ def create_app(workspace: Path | str = "./workspace", youtube_downloader: YouTub
             raise HTTPException(status_code=400, detail="Consent is required: only clone your own voice or voices you have explicit permission to use.")
         if mode not in {"mock", "real"}:
             raise HTTPException(status_code=400, detail="mode must be 'mock' or 'real'")
-        if guide_vocal is None:
-            raise HTTPException(status_code=400, detail="guide_vocal upload is required")
 
         youtube_url = sample_youtube_url.strip() if sample_youtube_url else None
+        guide_url = guide_youtube_url.strip() if guide_youtube_url else None
         has_upload = sample_song is not None and bool(sample_song.filename)
         has_youtube = bool(youtube_url)
+        has_guide_upload = guide_vocal is not None and bool(guide_vocal.filename)
+        has_guide_youtube = bool(guide_url)
         if has_upload == has_youtube:
             raise HTTPException(status_code=400, detail="Provide exactly one sample source: sample_song upload or sample_youtube_url")
+        if has_guide_upload == has_guide_youtube:
+            raise HTTPException(status_code=400, detail="Provide exactly one guide source: guide_vocal upload or guide_youtube_url")
 
         job_id = uuid.uuid4().hex[:12]
         upload_dir = workspace_path / "jobs" / job_id / "uploads"
         upload_dir.mkdir(parents=True, exist_ok=True)
         if has_youtube:
             try:
-                sample_path = downloader.download_audio(youtube_url, upload_dir)  # type: ignore[arg-type]
+                sample_path = downloader.download_audio(youtube_url, upload_dir, prefix="sample")  # type: ignore[arg-type]
             except Exception as exc:
                 raise HTTPException(status_code=400, detail=f"Could not download YouTube sample: {exc}") from exc
             sample_source = "youtube"
         else:
             sample_path = await _save_upload(sample_song, upload_dir)  # type: ignore[arg-type]
             sample_source = "upload"
-        guide_path = await _save_upload(guide_vocal, upload_dir)
+        if has_guide_youtube:
+            try:
+                guide_path = downloader.download_audio(guide_url, upload_dir, prefix="guide")  # type: ignore[arg-type]
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail=f"Could not download YouTube guide vocal: {exc}") from exc
+            guide_source = "youtube"
+        else:
+            guide_path = await _save_upload(guide_vocal, upload_dir)  # type: ignore[arg-type]
+            guide_source = "upload"
         instrumental_path = await _save_upload(instrumental, upload_dir) if instrumental else None
 
         record = store.create(
@@ -129,6 +145,8 @@ def create_app(workspace: Path | str = "./workspace", youtube_downloader: YouTub
                 sample_source=sample_source,
                 sample_youtube_url=youtube_url if has_youtube else None,
                 guide_vocal=str(guide_path),
+                guide_source=guide_source,
+                guide_youtube_url=guide_url if has_guide_youtube else None,
                 instrumental=str(instrumental_path) if instrumental_path else None,
             )
         )

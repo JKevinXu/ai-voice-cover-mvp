@@ -19,12 +19,12 @@ def test_downloader_builds_yt_dlp_audio_command(tmp_path: Path):
 
     def fake_runner(command: list[str]) -> None:
         commands.append(command)
-        (tmp_path / "sample.abc123.m4a").write_bytes(b"audio")
+        (tmp_path / "target.abc123.m4a").write_bytes(b"audio")
 
     downloader = YouTubeAudioDownloader(runner=fake_runner)
-    path = downloader.download_audio("https://youtu.be/dQw4w9WgXcQ", tmp_path)
+    path = downloader.download_audio("https://youtu.be/dQw4w9WgXcQ", tmp_path, prefix="target")
 
-    assert path.name == "sample.abc123.m4a"
+    assert path.name == "target.abc123.m4a"
     assert path.exists()
     command = commands[0]
     assert command[0] == "yt-dlp"

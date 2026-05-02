@@ -49,7 +49,7 @@ http://127.0.0.1:8000
 Upload:
 
 - sample song / target voice audio, or a YouTube URL for the target voice sample
-- guide vocal for the new song
+- guide vocal for the new song, or a YouTube URL for the guide vocal
 - optional instrumental
 - check the consent box
 - choose `mock`
@@ -78,7 +78,17 @@ curl -F consent=true \
   http://127.0.0.1:8000/api/jobs
 ```
 
-You must provide exactly one sample source: `sample_song` upload or `sample_youtube_url`.
+Create job with YouTube sample and YouTube guide URLs:
+
+```bash
+curl -F consent=true \
+  -F mode=mock \
+  -F sample_youtube_url='https://www.youtube.com/watch?v=VIDEO_ID_FOR_TARGET_VOICE' \
+  -F guide_youtube_url='https://www.youtube.com/watch?v=VIDEO_ID_FOR_GUIDE_VOCAL' \
+  http://127.0.0.1:8000/api/jobs
+```
+
+You must provide exactly one sample source: `sample_song` upload or `sample_youtube_url`. You must also provide exactly one guide source: `guide_vocal` upload or `guide_youtube_url`.
 
 Get job:
 
